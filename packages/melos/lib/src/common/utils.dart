@@ -45,6 +45,17 @@ const publishOptionGitTagVersion = 'git-tag-version';
 const publishOptionNoGitTagVersion = 'no-git-tag-version';
 const publishOptionYes = 'yes';
 const publishOptionForce = 'force';
+const publishOptionServer = 'server';
+
+/// The default command used to invoke Melos itself when a script needs to run
+/// a nested Melos command, such as `melos exec` or `melos run`.
+///
+/// This relies on Melos being available on the `PATH` (i.e. a global
+/// installation). When Melos is run from a local installation (e.g. as a
+/// `dev_dependency`) it is invoked through the Dart SDK instead so that
+/// scripts work without a global installation. See
+/// https://github.com/invertase/melos/issues/511.
+const defaultMelosCommand = ['melos'];
 
 extension Let<T> on T? {
   R? let<R>(R Function(T value) cb) {
@@ -314,12 +325,7 @@ String pubspecOverridesPathForDirectory(String directory) =>
     p.join(directory, 'pubspec_overrides.yaml');
 
 String relativePath(String path, String from) {
-  if (currentPlatform.isWindows) {
-    return p.windows
-        .normalize(p.relative(path, from: from))
-        .replaceAll(r'\', r'\\');
-  }
-  return p.normalize(p.relative(path, from: from));
+  return p.normalize(p.relative(path, from: from)).replaceAll(r'\', '/');
 }
 
 String listAsPaddedTable(List<List<String>> table, {int paddingSize = 1}) {
@@ -426,6 +432,7 @@ Future<Process> startCommandRaw(
   String? workingDirectory,
   Map<String, String> environment = const {},
   bool includeParentEnvironment = true,
+  ProcessStartMode mode = ProcessStartMode.normal,
 }) {
   final executable = currentPlatform.isWindows ? 'cmd.exe' : '/bin/sh';
   workingDirectory ??= Directory.current.path;
@@ -442,6 +449,7 @@ Future<Process> startCommandRaw(
       EnvironmentVariableKey.melosScript: command.join(' '),
     },
     includeParentEnvironment: includeParentEnvironment,
+    mode: mode,
   );
 }
 
@@ -459,6 +467,7 @@ Future<int> startCommand(
   bool includeParentEnvironment = true,
   String? group,
   ProcessOutputCancelToken? cancelToken,
+  bool inheritStdio = false,
 }) async {
   final processedCommand = command
       // Remove empty arguments.
@@ -471,9 +480,22 @@ Future<int> startCommand(
     workingDirectory: workingDirectory,
     environment: environment,
     includeParentEnvironment: includeParentEnvironment,
+    mode: inheritStdio
+        ? ProcessStartMode.inheritStdio
+        : ProcessStartMode.normal,
   );
 
   _runningPids.add(process.pid);
+
+  if (inheritStdio) {
+    // When stdio is inherited, the child writes directly to our terminal —
+    // its stdout/stderr streams are not available on the [Process] object,
+    // and there is nothing for melos to subscribe to. Just wait for it to
+    // finish.
+    final exitCode = await process.exitCode;
+    _runningPids.remove(process.pid);
+    return exitCode;
+  }
 
   var stdoutStream = process.stdout;
   var stderrStream = process.stderr;

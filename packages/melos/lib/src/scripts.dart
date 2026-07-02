@@ -10,6 +10,101 @@ import 'package.dart';
 // https://regex101.com/r/44dzaz/1
 final _leadingMelosExecRegExp = RegExp(r'^\s*melos\s+exec');
 
+const _scriptsExecDocsUrl =
+    'https://melos.invertase.dev/configuration/scripts#exec';
+
+/// Error message shown when a script specifies both `run` and `exec`, which is
+/// no longer supported as of Melos 8.0.0.
+String _execAndRunMigrationMessage({
+  required String name,
+  required Object run,
+  required Object exec,
+}) {
+  final buffer = StringBuffer()
+    ..writeln(
+      'The script "$name" specifies both "run" and "exec", which is no longer '
+      'supported as of Melos 8.0.0. A script either runs once in the workspace '
+      'root with "run", or across multiple packages with "exec". They are now '
+      'mutually exclusive.',
+    );
+
+  if (exec is Map) {
+    // The old format used "run" for the command and "exec" for its options.
+    // Show the user how to migrate to the new "exec.command" format.
+    final runCommand = run is String ? run : '<command>';
+    buffer
+      ..writeln()
+      ..writeln(
+        'It looks like you were using "run" for the command and "exec" for '
+        'its options. Move the command into "exec" under the new "command" '
+        'key:',
+      )
+      ..writeln()
+      ..writeln('    $name:')
+      ..writeln('      exec:')
+      ..writeln('        command: $runCommand');
+    for (final entry in exec.entries) {
+      buffer.writeln('        ${entry.key}: ${entry.value}');
+    }
+  } else {
+    buffer
+      ..writeln()
+      ..writeln(
+        'Both "run" and "exec" specify a command. Keep only one: use "run" to '
+        'run the command once in the workspace root, or "exec" to run it '
+        'across multiple packages.',
+      );
+  }
+
+  buffer
+    ..writeln()
+    ..write('For more information, see $_scriptsExecDocsUrl.');
+
+  return buffer.toString();
+}
+
+/// Error message shown when a script's `exec` is a configuration object that
+/// does not specify the command to run via the `command` key.
+String _execWithoutCommandMessage({required String name}) {
+  return 'The script "$name" uses "exec" without a command. As of Melos '
+      '8.0.0 the command must be specified with the "command" key inside '
+      '"exec":\n'
+      '\n'
+      '    $name:\n'
+      '      exec:\n'
+      '        command: <command>\n'
+      '        # ...other exec options such as concurrency\n'
+      '\n'
+      'For more information, see $_scriptsExecDocsUrl.';
+}
+
+/// Validates a single script step parsed from YAML and returns it as a command
+/// string.
+///
+/// A step containing an unquoted colon, such as `echo Building: app`, is parsed
+/// by the YAML parser as a map (`{echo Building: app}`) rather than a string.
+/// In that case a helpful error is thrown telling the user to quote the step,
+/// instead of the cryptic type error that was reported before.
+String _parseStep(Object? value, {required int index, required String path}) {
+  if (value is Map<Object?, Object?>) {
+    final reconstructed = value.entries
+        .map(
+          (entry) => entry.value == null
+              ? '${entry.key}:'
+              : '${entry.key}: ${entry.value}',
+        )
+        .join(' ');
+    throw MelosConfigException(
+      'The step at index $index in $path contains a ":" and was parsed as '
+      'YAML map syntax instead of a command. Wrap the step in quotes, for '
+      'example:\n'
+      '  - "$reconstructed"',
+    );
+  }
+
+  return assertIsA<String>(value: value, index: index, path: path);
+}
+
 class Scripts extends MapView<String, Script> {
   const Scripts(super.map);
 
@@ -96,6 +191,41 @@ ExecOptions(
 )''';
 }
 
+/// Controls how the standard streams of a script's child process are wired
+/// to melos's own process.
+enum ProcessStdio {
+  /// Child stdout and stderr are piped through melos so it can prefix output
+  /// with the script's indent. Child stdin is not connected. This is the
+  /// default and is what every script gets without an explicit `stdio` key.
+  pipe,
+
+  /// Child stdin, stdout, and stderr are inherited from melos's own terminal,
+  /// giving the script a real TTY. Required for any program that needs an
+  /// attached terminal — `tmux attach`, `vim`, `less`, `flutter run` /
+  /// `dart_frog dev` hot-reload keys. Melos drops its indented output prefix
+  /// for the duration of the script in exchange for the TTY.
+  inherit;
+
+  /// Parses the value of a script's `stdio:` config key.
+  ///
+  /// Throws [MelosConfigException] if [value] is not a recognised mode.
+  static ProcessStdio fromString(
+    String value, {
+    required String scriptName,
+  }) {
+    for (final mode in ProcessStdio.values) {
+      if (mode.name == value) {
+        return mode;
+      }
+    }
+    final allowed = ProcessStdio.values.map((m) => m.name).join(', ');
+    throw MelosConfigException(
+      'Invalid value "$value" for "stdio" on script $scriptName. '
+      'Expected one of: $allowed.',
+    );
+  }
+}
+
 @immutable
 class Script {
   const Script({
@@ -108,6 +238,7 @@ class Script {
     this.steps = const [],
     this.isPrivate = false,
     this.groups = const [],
+    this.stdio = ProcessStdio.pipe,
   });
 
   factory Script.fromYaml(
@@ -146,25 +277,47 @@ class Script {
     }
 
     final execYaml = yaml['exec'];
+    final runYaml = yaml['run'];
+
+    // A script either runs once in the workspace root via "run", or across
+    // multiple packages via "exec". The two are mutually exclusive.
+    if (execYaml != null && runYaml != null) {
+      throw MelosConfigException(
+        _execAndRunMigrationMessage(name: name, run: runYaml, exec: execYaml),
+      );
+    }
+
     if (execYaml is String) {
-      if (yaml['run'] is String) {
-        throw MelosConfigException(
-          'The script $name specifies a command in both "run" and "exec". '
-          'Remove one of them.',
-        );
-      }
+      // Shorthand: the command to execute in each package, with the default
+      // `melos exec` options.
       run = execYaml;
       exec = const ExecOptions();
-    } else {
-      final execMap = assertKeyIsA<Map<Object?, Object?>?>(
+    } else if (execYaml != null) {
+      final execMap = assertKeyIsA<Map<Object?, Object?>>(
         key: 'exec',
         map: yaml,
         path: scriptPath,
       );
 
-      exec = execMap != null
-          ? execOptionsFromYaml(execMap, scriptName: name)
-          : null;
+      final command = assertKeyIsA<String?>(
+        key: 'command',
+        map: execMap,
+        path: '$scriptPath/exec',
+      );
+      if (command == null || command.isEmpty) {
+        throw MelosConfigException(
+          _execWithoutCommandMessage(name: name),
+        );
+      }
+
+      run = command;
+      exec = execOptionsFromYaml(execMap, scriptName: name);
+    } else if (runYaml is String && runYaml.isNotEmpty) {
+      run = assertKeyIsA<String>(
+        key: 'run',
+        map: yaml,
+        path: scriptPath,
+      );
     }
 
     final stepsList = yaml['steps'];
@@ -174,25 +327,10 @@ class Script {
             map: yaml,
             isRequired: false,
             assertItemIsA: (index, value) {
-              return assertIsA<String>(
-                value: value,
-                index: index,
-                path: scriptPath,
-              );
+              return _parseStep(value, index: index, path: scriptPath);
             },
           )
         : [];
-
-    final runYaml = yaml['run'];
-    if (runYaml is String && runYaml.isNotEmpty) {
-      run = execYaml is String
-          ? execYaml
-          : assertKeyIsA<String>(
-              key: 'run',
-              map: yaml,
-              path: scriptPath,
-            );
-    }
 
     description = assertKeyIsA<String?>(
       key: 'description',
@@ -252,6 +390,15 @@ class Script {
           )
         : [];
 
+    final stdioValue = assertKeyIsA<String?>(
+      key: 'stdio',
+      map: yaml,
+      path: scriptPath,
+    );
+    final stdio = stdioValue != null
+        ? ProcessStdio.fromString(stdioValue, scriptName: name)
+        : ProcessStdio.pipe;
+
     return Script(
       name: name,
       run: run,
@@ -262,6 +409,7 @@ class Script {
       exec: exec,
       isPrivate: isPrivate ?? false,
       groups: groups,
+      stdio: stdio,
     );
   }
 
@@ -343,8 +491,21 @@ class Script {
   // The groups the script is belonging to
   final List<String>? groups;
 
+  /// How the script's child process should connect its standard streams to
+  /// melos. Defaults to [ProcessStdio.pipe]; set to [ProcessStdio.inherit] for
+  /// interactive commands that need a real terminal.
+  final ProcessStdio stdio;
+
   /// Returns the full command to run when executing this script.
-  List<String> command([List<String>? extraArgs]) {
+  ///
+  /// [melosCommand] is the command used to invoke Melos itself for nested
+  /// `melos exec` calls. It defaults to [defaultMelosCommand], but is replaced
+  /// with a Dart SDK invocation when Melos runs from a local installation so
+  /// that scripts work without a global installation.
+  List<String> command({
+    List<String>? extraArgs,
+    List<String> melosCommand = defaultMelosCommand,
+  }) {
     String quoteScript(String script) => '"${script.replaceAll('"', r'\"')}"';
 
     final scriptCommand = run!.split(' ').toList();
@@ -356,7 +517,7 @@ class Script {
     if (exec == null) {
       return scriptCommand;
     } else {
-      final execCommand = ['melos', 'exec'];
+      final execCommand = [...melosCommand, 'exec'];
 
       if (exec.concurrency != null) {
         execCommand.addAll(['--concurrency', '${exec.concurrency}']);
@@ -383,27 +544,48 @@ class Script {
         run != null &&
         run!.startsWith(_leadingMelosExecRegExp)) {
       throw MelosConfigException(
-        'Do not use "melos exec" in "run" when also providing options in '
-        '"exec". In this case the script in "run" is already being executed by '
-        '"melos exec".\n'
-        'For more information, see https://melos.invertase.dev/configuration/scripts#scriptsexec.\n'
+        'Do not use "melos exec" in the "command" of an "exec" script. The '
+        'command is already being executed by "melos exec".\n'
+        'For more information, see $_scriptsExecDocsUrl.\n'
         '\n'
-        '    run: $run',
+        '    command: $run',
+      );
+    }
+    if (stdio == ProcessStdio.inherit && exec != null) {
+      throw MelosConfigException(
+        'The script "$name" has both "stdio: inherit" and "exec", which are '
+        'not compatible. "stdio: inherit" attaches a single child process to '
+        'the parent terminal; "exec" runs the script across multiple '
+        'packages.',
+      );
+    }
+    if (stdio == ProcessStdio.inherit && (steps != null && steps!.isNotEmpty)) {
+      throw MelosConfigException(
+        'The script "$name" has both "stdio: inherit" and "steps", which are '
+        'not compatible. "stdio: inherit" applies to a single process. Put '
+        'the inherit flag on the individual scripts referenced from "steps" '
+        'instead.',
       );
     }
   }
 
   Map<Object?, Object?> toJson() {
+    final exec = this.exec;
     return {
       'name': name,
-      'run': run,
+      if (exec == null) 'run': run,
       if (description != null) 'description': description,
       if (env.isNotEmpty) 'env': env,
       if (packageFilters != null) 'packageFilters': packageFilters!.toJson(),
       if (steps != null) 'steps': steps,
-      if (exec != null) 'exec': exec!.toJson(),
+      if (exec != null)
+        'exec': {
+          if (run != null) 'command': run,
+          ...exec.toJson(),
+        },
       'private': isPrivate,
       if (groups != null) 'groups': groups,
+      if (stdio != ProcessStdio.pipe) 'stdio': stdio.name,
     };
   }
 
@@ -419,7 +601,8 @@ class Script {
       other.steps == steps &&
       other.isPrivate == isPrivate &&
       other.groups == groups &&
-      other.exec == exec;
+      other.exec == exec &&
+      other.stdio == stdio;
 
   @override
   int get hashCode =>
@@ -432,7 +615,8 @@ class Script {
       steps.hashCode ^
       exec.hashCode ^
       isPrivate.hashCode ^
-      groups.hashCode;
+      groups.hashCode ^
+      stdio.hashCode;
 
   @override
   String toString() {
@@ -446,7 +630,8 @@ Script(
   steps: $steps,
   exec: ${exec.toString().indent('  ')},
   private: $isPrivate,
-  groups: $groups
+  groups: $groups,
+  stdio: ${stdio.name}
 )''';
   }
 }

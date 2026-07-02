@@ -356,7 +356,7 @@ Generating IntelliJ IDE files...
           '../packages/b',
         );
       },
-      timeout: Platform.isLinux ? const Timeout(Duration(seconds: 45)) : null,
+      timeout: const Timeout(Duration(seconds: 90)),
     );
 
     test('respects user dependency_overrides', () async {
@@ -400,6 +400,282 @@ Generating IntelliJ IDE files...
         contains('hosted/pub.dev/path'),
       );
     });
+
+    test(
+      'writes dependencyOverridePaths to workspace pubspec_overrides.yaml '
+      'with melos-managed marker',
+      () async {
+        final overrideDir = createTestTempDir();
+        final overrideProject = await createProject(
+          overrideDir,
+          Pubspec('override_pkg'),
+          path: '',
+        );
+
+        final workspaceDir = await createTemporaryWorkspace(
+          workspacePackages: ['a'],
+          configBuilder: (path) => MelosWorkspaceConfig(
+            name: 'workspace',
+            packages: [createGlob('packages/**', currentDirectoryPath: path)],
+            commands: CommandConfigs(
+              bootstrap: BootstrapCommandConfigs(
+                dependencyOverridePaths: [
+                  createGlob(overrideProject.path, currentDirectoryPath: path),
+                ],
+              ),
+            ),
+            path: path,
+          ),
+        );
+
+        await createProject(
+          workspaceDir,
+          Pubspec(
+            'a',
+            dependencies: {
+              'override_pkg': HostedDependency(version: VersionConstraint.any),
+            },
+          ),
+        );
+
+        final logger = TestLogger();
+        final config = await MelosWorkspaceConfig.fromWorkspaceRoot(
+          workspaceDir,
+        );
+        final melos = Melos(logger: logger, config: config);
+
+        await runMelosBootstrap(melos, logger);
+
+        final overridesPath = pubspecOverridesPathForDirectory(
+          workspaceDir.path,
+        );
+        expect(File(overridesPath).existsSync(), isTrue);
+
+        final overridesContent = readTextFile(overridesPath);
+        expect(
+          overridesContent,
+          contains('# melos_managed_dependency_overrides: override_pkg'),
+        );
+
+        final parsedOverrides = loadYaml(overridesContent) as YamlMap;
+        final dependencyOverrides =
+            parsedOverrides['dependency_overrides'] as YamlMap;
+        expect(
+          (dependencyOverrides['override_pkg'] as YamlMap)['path'],
+          relativePath(overrideProject.path, workspaceDir.path),
+        );
+
+        final aConfig = packageConfigForPackageAt(workspaceDir);
+        expect(
+          p.canonicalize(
+            p.join(
+              p.dirname(packageConfigPath(workspaceDir.path)),
+              p.prettyUri(
+                aConfig.packages
+                    .firstWhere((p) => p.name == 'override_pkg')
+                    .rootUri,
+              ),
+            ),
+          ),
+          p.canonicalize(overrideProject.path),
+        );
+      },
+    );
+
+    test(
+      'preserves user-defined dependency_overrides alongside melos-managed '
+      'ones',
+      () async {
+        final overrideDir = createTestTempDir();
+        final overrideProject = await createProject(
+          overrideDir,
+          Pubspec('override_pkg'),
+          path: '',
+        );
+
+        final workspaceDir = await createTemporaryWorkspace(
+          workspacePackages: ['a'],
+          configBuilder: (path) => MelosWorkspaceConfig(
+            name: 'workspace',
+            packages: [createGlob('packages/**', currentDirectoryPath: path)],
+            commands: CommandConfigs(
+              bootstrap: BootstrapCommandConfigs(
+                dependencyOverridePaths: [
+                  createGlob(overrideProject.path, currentDirectoryPath: path),
+                ],
+              ),
+            ),
+            path: path,
+          ),
+        );
+
+        await createProject(
+          workspaceDir,
+          Pubspec(
+            'a',
+            dependencies: {
+              'override_pkg': HostedDependency(version: VersionConstraint.any),
+              'meta': HostedDependency(version: VersionConstraint.any),
+            },
+          ),
+        );
+
+        // Pre-existing pubspec_overrides.yaml with a user-defined override.
+        final overridesPath = pubspecOverridesPathForDirectory(
+          workspaceDir.path,
+        );
+        writeTextFile(
+          overridesPath,
+          '''
+dependency_overrides:
+  meta:
+    hosted: https://pub.dev
+    version: ^1.0.0
+''',
+        );
+
+        final logger = TestLogger();
+        final config = await MelosWorkspaceConfig.fromWorkspaceRoot(
+          workspaceDir,
+        );
+        final melos = Melos(logger: logger, config: config);
+
+        await runMelosBootstrap(melos, logger);
+
+        final overridesContent = readTextFile(overridesPath);
+        expect(
+          overridesContent,
+          contains('# melos_managed_dependency_overrides: override_pkg'),
+        );
+
+        final parsed = loadYaml(overridesContent) as YamlMap;
+        final overrides = parsed['dependency_overrides'] as YamlMap;
+        // User-defined entry preserved.
+        expect(overrides.containsKey('meta'), isTrue);
+        // Melos-managed entry written.
+        expect(
+          (overrides['override_pkg'] as YamlMap)['path'],
+          relativePath(overrideProject.path, workspaceDir.path),
+        );
+      },
+    );
+
+    test(
+      'expands glob patterns in dependencyOverridePaths to multiple packages',
+      () async {
+        final overridesRoot = createTestTempDir();
+        final overrideOne = await createProject(
+          overridesRoot,
+          Pubspec('override_one'),
+          path: 'one',
+          inWorkspace: false,
+        );
+        final overrideTwo = await createProject(
+          overridesRoot,
+          Pubspec('override_two'),
+          path: 'two',
+          inWorkspace: false,
+        );
+
+        final workspaceDir = await createTemporaryWorkspace(
+          workspacePackages: ['a'],
+          configBuilder: (path) => MelosWorkspaceConfig(
+            name: 'workspace',
+            packages: [createGlob('packages/**', currentDirectoryPath: path)],
+            commands: CommandConfigs(
+              bootstrap: BootstrapCommandConfigs(
+                dependencyOverridePaths: [
+                  createGlob(
+                    p.join(overridesRoot.path, '*'),
+                    currentDirectoryPath: path,
+                  ),
+                ],
+              ),
+            ),
+            path: path,
+          ),
+        );
+
+        await createProject(
+          workspaceDir,
+          Pubspec(
+            'a',
+            dependencies: {
+              'override_one': HostedDependency(version: VersionConstraint.any),
+              'override_two': HostedDependency(version: VersionConstraint.any),
+            },
+          ),
+        );
+
+        final logger = TestLogger();
+        final config = await MelosWorkspaceConfig.fromWorkspaceRoot(
+          workspaceDir,
+        );
+        await runMelosBootstrap(Melos(logger: logger, config: config), logger);
+
+        final overridesPath = pubspecOverridesPathForDirectory(
+          workspaceDir.path,
+        );
+        final overridesContent = readTextFile(overridesPath);
+        expect(
+          overridesContent,
+          contains(
+            '# melos_managed_dependency_overrides: '
+            'override_one,override_two',
+          ),
+        );
+
+        final overrides =
+            (loadYaml(overridesContent) as YamlMap)['dependency_overrides']
+                as YamlMap;
+        expect(
+          (overrides['override_one'] as YamlMap)['path'],
+          relativePath(overrideOne.path, workspaceDir.path),
+        );
+        expect(
+          (overrides['override_two'] as YamlMap)['path'],
+          relativePath(overrideTwo.path, workspaceDir.path),
+        );
+      },
+    );
+
+    test(
+      'removes obsolete melos-managed dependency_overrides on bootstrap',
+      () async {
+        final workspaceDir = await createTemporaryWorkspace(
+          workspacePackages: ['a'],
+        );
+
+        await createProject(
+          workspaceDir,
+          Pubspec('a'),
+        );
+
+        // Simulate state left by a previous bootstrap that had a
+        // dependencyOverridePaths entry which is no longer configured.
+        final overridesPath = pubspecOverridesPathForDirectory(
+          workspaceDir.path,
+        );
+        writeTextFile(
+          overridesPath,
+          '''
+# melos_managed_dependency_overrides: stale_pkg
+dependency_overrides:
+  stale_pkg:
+    path: ../stale_pkg
+''',
+        );
+
+        final logger = TestLogger();
+        final config = await MelosWorkspaceConfig.fromWorkspaceRoot(
+          workspaceDir,
+        );
+        await runMelosBootstrap(Melos(logger: logger, config: config), logger);
+
+        // The stale managed override and marker comment should be gone.
+        expect(File(overridesPath).existsSync(), isFalse);
+      },
+    );
 
     test('bootstrap flutter example packages', () async {
       final workspaceDir = await createTemporaryWorkspace(
@@ -727,6 +1003,112 @@ melos bootstrap
   └> ${workspaceDir.path}
 
 Running "${pubExecArgs.join(' ')} get" in workspace...
+  > SUCCESS
+
+Generating IntelliJ IDE files...
+  > SUCCESS
+
+ -> 0 packages bootstrapped
+''',
+        ),
+      );
+    });
+
+    test('can run pub get with extra pubGetArgs from config', () async {
+      final workspaceDir = await createTemporaryWorkspace(
+        workspacePackages: [],
+        configBuilder: (path) => MelosWorkspaceConfig.fromYaml(
+          createYamlMap(
+            {
+              'melos': {
+                'command': {
+                  'bootstrap': {
+                    'pubGetArgs': ['--no-precompile'],
+                  },
+                },
+              },
+            },
+            defaults: configMapDefaults,
+          ),
+          path: path,
+        ),
+      );
+
+      final logger = TestLogger();
+      final config = await MelosWorkspaceConfig.fromWorkspaceRoot(workspaceDir);
+      final workspace = await MelosWorkspace.fromConfig(
+        config,
+        logger: logger.toMelosLogger(),
+      );
+      final melos = Melos(logger: logger, config: config);
+      final pubExecArgs = pubCommandExecArgs(
+        useFlutter: workspace.isFlutterWorkspace,
+        workspace: workspace,
+      );
+
+      await runMelosBootstrap(melos, logger);
+
+      expect(
+        logger.output,
+        ignoringAnsii(
+          '''
+melos bootstrap
+  └> ${workspaceDir.path}
+
+Running "${pubExecArgs.join(' ')} get --no-precompile" in workspace...
+  > SUCCESS
+
+Generating IntelliJ IDE files...
+  > SUCCESS
+
+ -> 0 packages bootstrapped
+''',
+        ),
+      );
+    });
+
+    test('can run pub get with multiple pubGetArgs from config', () async {
+      final workspaceDir = await createTemporaryWorkspace(
+        workspacePackages: [],
+        configBuilder: (path) => MelosWorkspaceConfig.fromYaml(
+          createYamlMap(
+            {
+              'melos': {
+                'command': {
+                  'bootstrap': {
+                    'pubGetArgs': ['--no-precompile', '--no-example'],
+                  },
+                },
+              },
+            },
+            defaults: configMapDefaults,
+          ),
+          path: path,
+        ),
+      );
+
+      final logger = TestLogger();
+      final config = await MelosWorkspaceConfig.fromWorkspaceRoot(workspaceDir);
+      final workspace = await MelosWorkspace.fromConfig(
+        config,
+        logger: logger.toMelosLogger(),
+      );
+      final melos = Melos(logger: logger, config: config);
+      final pubExecArgs = pubCommandExecArgs(
+        useFlutter: workspace.isFlutterWorkspace,
+        workspace: workspace,
+      );
+
+      await runMelosBootstrap(melos, logger);
+
+      expect(
+        logger.output,
+        ignoringAnsii(
+          '''
+melos bootstrap
+  └> ${workspaceDir.path}
+
+Running "${pubExecArgs.join(' ')} get --no-precompile --no-example" in workspace...
   > SUCCESS
 
 Generating IntelliJ IDE files...

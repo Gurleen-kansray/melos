@@ -79,7 +79,10 @@ mixin _RunMixin on _Melos {
     }
 
     final scriptSourceCode = targetStyle(
-      script.command(extraArgs).join(' ').withoutTrailing('\n'),
+      script
+          .command(extraArgs: extraArgs, melosCommand: config.melosCommand)
+          .join(' ')
+          .withoutTrailing('\n'),
     );
 
     logger.command('melos run ${script.name}');
@@ -312,10 +315,11 @@ mixin _RunMixin on _Melos {
     }
 
     return startCommand(
-      script.command(extraArgs),
+      script.command(extraArgs: extraArgs, melosCommand: config.melosCommand),
       logger: logger,
       environment: environment,
       workingDirectory: config.path,
+      inheritStdio: script.stdio == ProcessStdio.inherit,
     );
   }
 
@@ -368,12 +372,13 @@ mixin _RunMixin on _Melos {
   }
 
   String _buildScriptCommand(String step, Scripts scripts) {
+    final melos = config.melosCommand.join(' ');
     if (scripts.containsKey(step)) {
-      return 'melos run $step --include-private';
+      return '$melos run $step --include-private';
     }
 
     if (_isStepACommand(step)) {
-      return 'melos $step';
+      return '$melos $step';
     }
 
     return step;

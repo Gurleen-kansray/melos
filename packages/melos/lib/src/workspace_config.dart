@@ -67,6 +67,7 @@ class IntelliJConfig {
     this.moduleNamePrefix = _defaultModuleNamePrefix,
     this.executeInTerminal = _defaultExecuteInTerminal,
     this.generateAppRunConfigs = _defaultGenerateAppRunConfigs,
+    this.scriptNamePrefix = _defaultScriptNamePrefix,
     this.runArguments = const {},
   });
 
@@ -96,6 +97,13 @@ class IntelliJConfig {
               path: 'ide/intellij',
             )
           : _defaultGenerateAppRunConfigs;
+      final scriptNamePrefix = yaml.containsKey('scriptNamePrefix')
+          ? assertKeyIsA<String>(
+              key: 'scriptNamePrefix',
+              map: yaml,
+              path: 'ide/intellij',
+            )
+          : _defaultScriptNamePrefix;
       final rawRunArgsYaml = yaml['runArguments'];
       final rawRunArgs = (rawRunArgsYaml is Map)
           ? rawRunArgsYaml.cast<Object?, Object?>()
@@ -115,6 +123,7 @@ class IntelliJConfig {
         moduleNamePrefix: moduleNamePrefix,
         executeInTerminal: executeInTerminal,
         generateAppRunConfigs: generateAppRunConfigs,
+        scriptNamePrefix: scriptNamePrefix,
         runArguments: runArguments,
       );
     } else {
@@ -129,6 +138,7 @@ class IntelliJConfig {
 
   static const empty = IntelliJConfig();
   static const _defaultModuleNamePrefix = 'melos_';
+  static const _defaultScriptNamePrefix = 'Melos Run -> ';
   static const _defaultEnabled = true;
   static const _defaultExecuteInTerminal = true;
   static const _defaultGenerateAppRunConfigs = true;
@@ -141,6 +151,8 @@ class IntelliJConfig {
 
   final bool generateAppRunConfigs;
 
+  final String scriptNamePrefix;
+
   final Map<String, List<IdeRunConfiguration>> runArguments;
 
   Object? toJson() {
@@ -149,6 +161,7 @@ class IntelliJConfig {
       'moduleNamePrefix': moduleNamePrefix,
       'executeInTerminal': executeInTerminal,
       'generateAppRunConfigs': generateAppRunConfigs,
+      'scriptNamePrefix': scriptNamePrefix,
       'runArguments': runArguments.map(
         (key, value) => MapEntry(
           key,
@@ -166,6 +179,7 @@ class IntelliJConfig {
       other.moduleNamePrefix == moduleNamePrefix &&
       other.executeInTerminal == executeInTerminal &&
       other.generateAppRunConfigs == generateAppRunConfigs &&
+      other.scriptNamePrefix == scriptNamePrefix &&
       const DeepCollectionEquality().equals(
         other.runArguments,
         runArguments,
@@ -178,6 +192,7 @@ class IntelliJConfig {
       moduleNamePrefix.hashCode ^
       executeInTerminal.hashCode ^
       generateAppRunConfigs.hashCode ^
+      scriptNamePrefix.hashCode ^
       const DeepCollectionEquality().hash(runArguments);
 
   @override
@@ -187,7 +202,8 @@ IntelliJConfig(
   enabled: $enabled,
   moduleNamePrefix: $moduleNamePrefix,
   executeInTerminal: $executeInTerminal,
-  generateAppRunConfigs: $generateAppRunConfigs
+  generateAppRunConfigs: $generateAppRunConfigs,
+  scriptNamePrefix: $scriptNamePrefix
 )
 ''';
   }
@@ -272,6 +288,7 @@ class MelosWorkspaceConfig {
     this.pub = const PubClientConfig(),
     this.useRootAsPackage = false,
     this.discoverNestedWorkspaces = false,
+    this.melosCommand = defaultMelosCommand,
   }) {
     _validate();
   }
@@ -279,6 +296,7 @@ class MelosWorkspaceConfig {
   factory MelosWorkspaceConfig.fromYaml(
     Map<Object?, Object?> pubspecYaml, {
     required String path,
+    List<String> melosCommand = defaultMelosCommand,
   }) {
     final name = assertKeyIsA<String>(key: 'name', map: pubspecYaml);
     if (!isValidPubPackageName(name)) {
@@ -448,6 +466,7 @@ class MelosWorkspaceConfig {
             ),
       useRootAsPackage: useRootAsPackage,
       discoverNestedWorkspaces: discoverNestedWorkspaces,
+      melosCommand: melosCommand,
     );
   }
 
@@ -480,8 +499,9 @@ class MelosWorkspaceConfig {
 
   /// Loads the [MelosWorkspaceConfig] for the workspace at [workspaceRoot].
   static Future<MelosWorkspaceConfig> fromWorkspaceRoot(
-    Directory workspaceRoot,
-  ) async {
+    Directory workspaceRoot, {
+    List<String> melosCommand = defaultMelosCommand,
+  }) async {
     final rootPubspecFile = File(pubspecPathForDirectory(workspaceRoot.path));
 
     if (!rootPubspecFile.existsSync()) {
@@ -522,6 +542,7 @@ class MelosWorkspaceConfig {
     return MelosWorkspaceConfig.fromYaml(
       rootPubspecContent,
       path: workspaceRoot.path,
+      melosCommand: melosCommand,
     );
   }
 
@@ -635,6 +656,10 @@ class MelosWorkspaceConfig {
   /// Defaults to false.
   final bool discoverNestedWorkspaces;
 
+  /// The command used to invoke Melos itself when a script runs a nested Melos
+  /// command (e.g. `melos exec`).
+  final List<String> melosCommand;
+
   /// Validates this workspace configuration for consistency.
   void _validate() {
     final workspaceDir = Directory(path);
@@ -655,9 +680,15 @@ class MelosWorkspaceConfig {
 
   /// Validates the physical workspace on the file system.
   void _validatePhysicalWorkspace() {
-    if (!dirExists(path)) {
+    try {
+      if (!dirExists(path)) {
+        throw MelosConfigException(
+          'The path $path does not point to a directory',
+        );
+      }
+    } on FileSystemException catch (e) {
       throw MelosConfigException(
-        'The path $path does not point to a directory',
+        'The path $path does not point to a directory: ${e.message}',
       );
     }
   }

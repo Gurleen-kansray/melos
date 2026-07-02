@@ -168,14 +168,14 @@ ${'-' * terminalWidth}
           Pubspec('a'),
         );
 
-        createDelayedExitFile(a, delay: 1000);
+        createDelayedExitFile(a, delay: 4000);
 
         final b = await createProject(
           workspaceDir,
           Pubspec('b'),
         );
 
-        createDelayedExitFile(b, delay: 500);
+        createDelayedExitFile(b, delay: 2000);
 
         final c = await createProject(
           workspaceDir,
@@ -256,10 +256,13 @@ ${'-' * terminalWidth}
           failFast: true,
         );
 
+        // Packages run concurrently so any one may fail first on a given
+        // platform. Assert structure without pinning which package fails.
         expect(
           logger.output.normalizeLines(),
           ignoringAnsii(
-            '''
+            allOf([
+              contains('''
 \$ melos exec
   └> exit 2
      └> RUNNING (in 3 packages)
@@ -269,12 +272,11 @@ ${'-' * terminalWidth}
 
 \$ melos exec
   └> exit 2
-     └> FAILED (in 1 packages)
-        └> a (with exit code 2)
-     └> CANCELED (in 2 packages)
-        └> b (due to failFast)
-        └> c (due to failFast)
-''',
+     └> FAILED (in 1 packages)'''),
+              contains('(with exit code 2)'),
+              contains('CANCELED (in 2 packages)'),
+              contains('(due to failFast)'),
+            ]),
           ),
         );
       });
@@ -502,10 +504,13 @@ ${'-' * terminalWidth}
             orderDependents: true,
           );
 
+          // b and e are in the same topological layer and run concurrently,
+          // so their relative output order is non-deterministic.
           expect(
             logger.output.normalizeLines(),
-            ignoringAnsii(
-              '''
+            anyOf(
+              ignoringAnsii(
+                '''
 \$ melos exec
   └> echo hello world
      └> RUNNING (in 5 packages)
@@ -522,6 +527,26 @@ ${'-' * terminalWidth}
   └> echo hello world
      └> SUCCESS
 ''',
+              ),
+              ignoringAnsii(
+                '''
+\$ melos exec
+  └> echo hello world
+     └> RUNNING (in 5 packages)
+
+${'-' * terminalWidth}
+[d]: hello world
+[c]: hello world
+[e]: hello world
+[b]: hello world
+[a]: hello world
+${'-' * terminalWidth}
+
+\$ melos exec
+  └> echo hello world
+     └> SUCCESS
+''',
+              ),
             ),
           );
         },

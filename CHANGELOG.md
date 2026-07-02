@@ -3,6 +3,145 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2026-06-23
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - [`melos` - `v8.0.0`](#melos---v800)
+
+Packages with other changes:
+
+ - There are no other changes in this release.
+
+---
+
+#### `melos` - `v8.0.0`
+
+ - **FIX**(scripts): run nested melos commands without a global installation ([#1031](https://github.com/invertase/melos/issues/1031)). ([efcd5ced](https://github.com/invertase/melos/commit/efcd5cede0155c96e0a13e09c6f8d0939da1abba))
+ - **FIX**: include commits in changelog when graduating a pre-release ([#1028](https://github.com/invertase/melos/issues/1028)). ([850d5ca3](https://github.com/invertase/melos/commit/850d5ca3a832ee65ef8716fab1b2d150fd477e20))
+ - **FIX**: give a helpful error for unquoted script steps with a colon ([#1029](https://github.com/invertase/melos/issues/1029)). ([648e26d8](https://github.com/invertase/melos/commit/648e26d8f0227368c146a2e20d5fd9dc85d5b9a5))
+ - **FIX**: require cli_launcher ^0.3.3+1 for workspace null-check fix ([#1027](https://github.com/invertase/melos/issues/1027)). ([e36402fc](https://github.com/invertase/melos/commit/e36402fc815ed89e801b5a0d3cd2474704842523))
+ - **FIX**: only suggest updates compatible with the current Dart SDK ([#1026](https://github.com/invertase/melos/issues/1026)). ([434ce85e](https://github.com/invertase/melos/commit/434ce85ec4b2a52c4fe39625f414acbe24052021))
+ - **FEAT**: add option to group changelog commits by type ([#1030](https://github.com/invertase/melos/issues/1030)). ([6eaa2c1d](https://github.com/invertase/melos/commit/6eaa2c1dc59e2df97cdf729ab445e16ae66a4f21))
+ - **FEAT**: add pubServer config option to melos publish ([#1024](https://github.com/invertase/melos/issues/1024)). ([7c5fce2f](https://github.com/invertase/melos/commit/7c5fce2fd92797dc60c3df0ab95de9a8f48599e3))
+ - **BREAKING** **FIX**: retain and increment build numbers when versioning ([#1018](https://github.com/invertase/melos/issues/1018)). ([1ad65d73](https://github.com/invertase/melos/commit/1ad65d731dcfafd2027761667851d9159ab0a514))
+ - **BREAKING** **FEAT**: configure exec command via "exec.command" ([#1025](https://github.com/invertase/melos/issues/1025)). ([03b2ed99](https://github.com/invertase/melos/commit/03b2ed99853afb79a169421b77b7579373d96f73))
+
+
+## 2026-06-10
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - There are no breaking changes in this release.
+
+Packages with other changes:
+
+ - [`melos` - `v7.8.2`](#melos---v782)
+
+---
+
+#### `melos` - `v7.8.2`
+
+ - **FIX**: replace deprecated applicationConfigHome with BaseDirectories ([#1022](https://github.com/invertase/melos/issues/1022)). ([8faf8acd](https://github.com/invertase/melos/commit/8faf8acd26f3ed153534b06c93b5ff337b142178))
+ - **FIX**: Bump cli_util to 0.5.1 ([#1020](https://github.com/invertase/melos/issues/1020)). ([24b1b5a1](https://github.com/invertase/melos/commit/24b1b5a1776a58f2e0bf8b9d40acf34a1d6ff282))
+
+
+## 2026-06-03
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - There are no breaking changes in this release.
+
+Packages with other changes:
+
+ - [`melos` - `v7.8.1`](#melos---v781)
+
+---
+
+#### `melos` - `v7.8.1`
+
+ - **FIX**(deps): allow xml 7 via widened constraint ([#1016](https://github.com/invertase/melos/issues/1016)). ([5e1066f0](https://github.com/invertase/melos/commit/5e1066f0cc1dd8cbf680ebc0d017c7ce1711b883))
+
+
+## 2026-05-25
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - There are no breaking changes in this release.
+
+Packages with other changes:
+
+ - [`melos` - `v7.8.0`](#melos---v780)
+
+---
+
+#### `melos` - `v7.8.0`
+
+ - **FIX**(windows): strip leading blank lines from first CMD output chunk ([#1012](https://github.com/invertase/melos/issues/1012)). ([95781101](https://github.com/invertase/melos/commit/95781101a6e4eac91e77a02a0e20dc41b0ad994f))
+ - **FIX**: resolve remaining Windows CI test failures ([#1013](https://github.com/invertase/melos/issues/1013)). ([47e3cb51](https://github.com/invertase/melos/commit/47e3cb51913f1786dee606ead14b61f70e216a7e))
+ - **FIX**: make tests pass on Windows ([#1011](https://github.com/invertase/melos/issues/1011)). ([1c8dbf37](https://github.com/invertase/melos/commit/1c8dbf37fad37c0ecbb631df93068aebbba83044))
+ - **FEAT**(scripts): add stdio: inherit for interactive scripts ([#1010](https://github.com/invertase/melos/issues/1010)). ([5a41c649](https://github.com/invertase/melos/commit/5a41c64982b6e279becbe845d61b091a5ea38395))
+
+
+## 2026-05-06
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - There are no breaking changes in this release.
+
+Packages with other changes:
+
+ - [`melos` - `v7.7.0`](#melos---v770)
+
+---
+
+#### `melos` - `v7.7.0`
+
+ - **FIX**(bootstrap): apply `dependencyOverridePaths` to workspace pubspec_overrides.yaml ([#1008](https://github.com/invertase/melos/issues/1008)). ([f075b271](https://github.com/invertase/melos/commit/f075b271b36b7ea15d679367f965128a8c04e677))
+ - **FEAT**: add `pubGetArgs` to `BootstrapCommandConfigs` ([#1007](https://github.com/invertase/melos/issues/1007)). ([1d9dddf5](https://github.com/invertase/melos/commit/1d9dddf54e521779fde9b64fa4a0fa61d8b13a5f))
+
+
+## 2026-05-04
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - There are no breaking changes in this release.
+
+Packages with other changes:
+
+ - [`melos` - `v7.6.0`](#melos---v760)
+
+---
+
+#### `melos` - `v7.6.0`
+
+ - **FEAT**(intellij): add runArguments support for IntelliJ run configurations ([#1005](https://github.com/invertase/melos/issues/1005)). ([5012a00b](https://github.com/invertase/melos/commit/5012a00bd0b6ce59d03674b65e0fe10f3fa806ff))
+
+
 ## 2026-04-05
 
 ### Changes

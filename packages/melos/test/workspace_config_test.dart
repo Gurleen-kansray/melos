@@ -1,11 +1,13 @@
 import 'package:melos/melos.dart';
 import 'package:melos/src/command_configs/command_configs.dart';
+import 'package:melos/src/command_configs/publish.dart';
 import 'package:melos/src/common/git_repository.dart';
 import 'package:melos/src/common/glob.dart';
 import 'package:melos/src/common/platform.dart';
 import 'package:melos/src/common/retry_backoff.dart';
 import 'package:melos/src/workspace_config.dart';
 import 'package:test/test.dart';
+import 'package:yaml/yaml.dart';
 
 import 'matchers.dart';
 import 'utils.dart';
@@ -73,6 +75,8 @@ void main() {
       expect(value.includeCommitId, false);
       expect(value.linkToCommits, false);
       expect(value.updateGitTagRefs, false);
+      expect(value.includeDateInChangelogEntry, false);
+      expect(value.groupChangelogEntriesByType, false);
       expect(value.aggregateChangelogs, [
         AggregateChangelogConfig.workspace(),
       ]);
@@ -161,6 +165,36 @@ void main() {
                 description: 'Changelog for all foo packages.',
               ),
             ],
+          ),
+        );
+      });
+
+      test('throws if changelogFormat/groupByType is not a bool', () {
+        expect(
+          () => VersionCommandConfigs.fromYaml(
+            const {
+              'changelogFormat': {'groupByType': 42},
+            },
+            workspacePath: '.',
+          ),
+          throwsMelosConfigException(),
+        );
+      });
+
+      test('can decode changelogFormat values', () {
+        expect(
+          VersionCommandConfigs.fromYaml(
+            const {
+              'changelogFormat': {
+                'includeDate': true,
+                'groupByType': true,
+              },
+            },
+            workspacePath: '.',
+          ),
+          const VersionCommandConfigs(
+            includeDateInChangelogEntry: true,
+            groupChangelogEntriesByType: true,
           ),
         );
       });
@@ -327,6 +361,57 @@ void main() {
           throwsMelosConfigException(),
         );
       });
+
+      test('can decode publish pubServer', () {
+        expect(
+          CommandConfigs.fromYaml(
+            const {
+              'publish': {
+                'pubServer': 'https://pub.flutter-io.cn',
+              },
+            },
+            workspacePath: '.',
+          ),
+          const CommandConfigs(
+            publish: PublishCommandConfigs(
+              pubServer: 'https://pub.flutter-io.cn',
+            ),
+          ),
+        );
+      });
+    });
+  });
+
+  group('PublishCommandConfigs', () {
+    group('fromYaml', () {
+      test('accepts empty object', () {
+        expect(
+          PublishCommandConfigs.fromYaml(const {}, workspacePath: '.'),
+          PublishCommandConfigs.empty,
+        );
+      });
+
+      test('can decode pubServer', () {
+        expect(
+          PublishCommandConfigs.fromYaml(
+            const {'pubServer': 'https://pub.flutter-io.cn'},
+            workspacePath: '.',
+          ),
+          const PublishCommandConfigs(
+            pubServer: 'https://pub.flutter-io.cn',
+          ),
+        );
+      });
+
+      test('throws if pubServer is not a string', () {
+        expect(
+          () => PublishCommandConfigs.fromYaml(
+            const {'pubServer': 42},
+            workspacePath: '.',
+          ),
+          throwsMelosConfigException(),
+        );
+      });
     });
   });
 
@@ -394,6 +479,13 @@ void main() {
       );
     });
 
+    test('has "Melos Run -> " scriptNamePrefix by default', () {
+      expect(
+        IntelliJConfig.empty.scriptNamePrefix,
+        'Melos Run -> ',
+      );
+    });
+
     group('fromYaml', () {
       test('yields default config from empty map', () {
         expect(
@@ -417,6 +509,20 @@ void main() {
         expect(
           IntelliJConfig.fromYaml(const {'moduleNamePrefix': 'prefix1'}),
           const IntelliJConfig(moduleNamePrefix: 'prefix1'),
+        );
+      });
+
+      test('supports "scriptNamePrefix" override', () {
+        expect(
+          IntelliJConfig.fromYaml(const {'scriptNamePrefix': 'prefix1'}),
+          const IntelliJConfig(scriptNamePrefix: 'prefix1'),
+        );
+      });
+
+      test('supports empty "scriptNamePrefix"', () {
+        expect(
+          IntelliJConfig.fromYaml(const {'scriptNamePrefix': ''}),
+          const IntelliJConfig(scriptNamePrefix: ''),
         );
       });
 
@@ -447,7 +553,7 @@ void main() {
 
   group('Scripts', () {
     group('exec', () {
-      test('supports specifying command through "exec"', () {
+      test('supports specifying command as a string through "exec"', () {
         final scripts = Scripts.fromYaml(
           createYamlMap({
             'a': {
@@ -460,12 +566,13 @@ void main() {
         expect(scripts['a']!.exec, const ExecOptions());
       });
 
-      test('supports specifying command through "run"', () {
+      test('supports specifying command through "exec.command"', () {
         final scripts = Scripts.fromYaml(
           createYamlMap({
             'a': {
-              'run': 'b',
-              'exec': <String, Object?>{},
+              'exec': {
+                'command': 'b',
+              },
             },
           }),
           workspacePath: testWorkspacePath,
@@ -474,12 +581,12 @@ void main() {
         expect(scripts['a']!.exec, const ExecOptions());
       });
 
-      test('supports specifying exec options', () {
+      test('supports specifying exec options alongside "exec.command"', () {
         final scripts = Scripts.fromYaml(
           createYamlMap({
             'a': {
-              'run': 'b',
               'exec': {
+                'command': 'b',
                 'concurrency': 1,
                 'failFast': true,
                 'orderDependents': true,
@@ -499,7 +606,7 @@ void main() {
         );
       });
 
-      test('throws when specifying command in "run" and "exec"', () {
+      test('throws when specifying a string command in "run" and "exec"', () {
         expect(
           () => Scripts.fromYaml(
             createYamlMap({
@@ -514,15 +621,192 @@ void main() {
         );
       });
 
-      test('throws when using "melos exec" in "run" and specifying "exec"', () {
+      test('throws with migration hint for the old "run" + "exec" format', () {
         expect(
           () => Scripts.fromYaml(
             createYamlMap({
               'a': {
-                'run': 'melos exec a',
+                'run': 'b',
                 'exec': {
                   'concurrency': 1,
                 },
+              },
+            }),
+            workspacePath: testWorkspacePath,
+          ),
+          throwsA(
+            isA<MelosConfigException>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                contains('mutually exclusive'),
+                contains('command: b'),
+                contains('concurrency: 1'),
+              ),
+            ),
+          ),
+        );
+      });
+
+      test('throws when "exec" is an object without a command', () {
+        expect(
+          () => Scripts.fromYaml(
+            createYamlMap({
+              'a': {
+                'exec': {
+                  'concurrency': 1,
+                },
+              },
+            }),
+            workspacePath: testWorkspacePath,
+          ),
+          throwsA(
+            isA<MelosConfigException>().having(
+              (e) => e.message,
+              'message',
+              contains('without a command'),
+            ),
+          ),
+        );
+      });
+
+      test('throws when using "melos exec" in "exec.command"', () {
+        expect(
+          () => Scripts.fromYaml(
+            createYamlMap({
+              'a': {
+                'exec': {
+                  'command': 'melos exec a',
+                  'concurrency': 1,
+                },
+              },
+            }),
+            workspacePath: testWorkspacePath,
+          ).validate(),
+          throwsA(isA<MelosConfigException>()),
+        );
+      });
+    });
+
+    group('steps', () {
+      test('parses a list of string steps', () {
+        final scripts = Scripts.fromYaml(
+          loadYaml('''
+a:
+  steps:
+    - echo hello
+    - echo world
+''')
+              as Map<Object?, Object?>,
+          workspacePath: testWorkspacePath,
+        );
+        expect(scripts['a']!.steps, ['echo hello', 'echo world']);
+      });
+
+      test('parses quoted steps containing a colon', () {
+        final scripts = Scripts.fromYaml(
+          loadYaml('''
+a:
+  steps:
+    - "echo Checking python version:"
+    - "echo Building: app"
+''')
+              as Map<Object?, Object?>,
+          workspacePath: testWorkspacePath,
+        );
+        expect(
+          scripts['a']!.steps,
+          ['echo Checking python version:', 'echo Building: app'],
+        );
+      });
+
+      test('throws a helpful error for unquoted steps containing a colon', () {
+        expect(
+          () => Scripts.fromYaml(
+            loadYaml('''
+a:
+  steps:
+    - echo Building: app
+''')
+                as Map<Object?, Object?>,
+            workspacePath: testWorkspacePath,
+          ),
+          throwsA(
+            isA<MelosConfigException>().having(
+              (e) => e.message,
+              'message',
+              allOf(contains('Wrap the step in quotes'), contains('":"')),
+            ),
+          ),
+        );
+      });
+    });
+
+    group('stdio', () {
+      test('defaults to ProcessStdio.pipe when the key is omitted', () {
+        final scripts = Scripts.fromYaml(
+          createYamlMap({
+            'a': {
+              'run': 'b',
+            },
+          }),
+          workspacePath: testWorkspacePath,
+        );
+        expect(scripts['a']!.stdio, ProcessStdio.pipe);
+      });
+
+      test('parses "stdio: inherit"', () {
+        final scripts = Scripts.fromYaml(
+          createYamlMap({
+            'a': {
+              'run': 'b',
+              'stdio': 'inherit',
+            },
+          }),
+          workspacePath: testWorkspacePath,
+        );
+        expect(scripts['a']!.stdio, ProcessStdio.inherit);
+      });
+
+      test('throws when "stdio" is set to an unknown value', () {
+        expect(
+          () => Scripts.fromYaml(
+            createYamlMap({
+              'a': {
+                'run': 'b',
+                'stdio': 'bogus',
+              },
+            }),
+            workspacePath: testWorkspacePath,
+          ),
+          throwsA(isA<MelosConfigException>()),
+        );
+      });
+
+      test('throws when "stdio: inherit" is combined with "exec"', () {
+        expect(
+          () => Scripts.fromYaml(
+            createYamlMap({
+              'a': {
+                'stdio': 'inherit',
+                'exec': {
+                  'command': 'b',
+                },
+              },
+            }),
+            workspacePath: testWorkspacePath,
+          ).validate(),
+          throwsA(isA<MelosConfigException>()),
+        );
+      });
+
+      test('throws when "stdio: inherit" is combined with "steps"', () {
+        expect(
+          () => Scripts.fromYaml(
+            createYamlMap({
+              'a': {
+                'stdio': 'inherit',
+                'steps': ['echo hi'],
               },
             }),
             workspacePath: testWorkspacePath,

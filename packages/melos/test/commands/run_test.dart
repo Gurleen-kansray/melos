@@ -386,14 +386,49 @@ ${'-' * terminalWidth}
       await createProject(workspaceDir, Pubspec('a'));
       await runPubGet(workspaceDir.path);
 
-      final logger = TestLogger();
-      final config = await MelosWorkspaceConfig.fromWorkspaceRoot(workspaceDir);
-      final melos = Melos(
-        logger: logger,
-        config: config,
+      await expectLater(
+        MelosWorkspaceConfig.fromWorkspaceRoot(workspaceDir),
+        throwsA(isA<MelosConfigException>()),
       );
+    });
 
-      expect(() => melos.run(scriptName: 'test_script'), throwsException);
+    group('command', () {
+      test('uses "melos" by default for "exec" scripts', () {
+        const script = Script(
+          name: 'test_script',
+          run: 'echo "hello"',
+          exec: ExecOptions(),
+        );
+
+        expect(script.command(), ['melos', 'exec', '--', r'"echo \"hello\""']);
+      });
+
+      test(
+        'uses the provided melosCommand for "exec" scripts when Melos is '
+        'installed locally',
+        () {
+          // Simulates a local installation, where Melos is not on the PATH and
+          // must be invoked through the Dart SDK.
+          // https://github.com/invertase/melos/issues/511
+          const script = Script(
+            name: 'test_script',
+            run: 'echo "hello"',
+            exec: ExecOptions(),
+          );
+
+          expect(
+            script.command(melosCommand: const ['dart', 'run', 'melos:melos']),
+            [
+              'dart',
+              'run',
+              'melos:melos',
+              'exec',
+              '--',
+              r'"echo \"hello\""',
+            ],
+          );
+        },
+      );
     });
   });
 
@@ -412,10 +447,14 @@ it should list the contents including the package named "this_is_package_a".
             packages: [
               createGlob('packages/**', currentDirectoryPath: path),
             ],
-            scripts: const Scripts({
+            scripts: Scripts({
               'cd_script': Script(
                 name: 'cd_script',
-                steps: ['cd packages', 'ls -la', 'pwd'],
+                steps: [
+                  'cd packages',
+                  if (currentPlatform.isWindows) 'dir' else 'ls -la',
+                  if (currentPlatform.isWindows) 'cd' else 'pwd',
+                ],
               ),
             }),
           ),
@@ -491,7 +530,7 @@ melos run test_script
 
 ${currentPlatform.isWindows ? '"test_script"' : 'test_script'}
 
-➡️  Step: echo hello world
+➡️  Step: echo ${currentPlatform.isWindows ? '"hello world"' : 'hello world'}
 ${currentPlatform.isWindows ? '"hello world"' : 'hello world'}
 
 SUCCESS
@@ -529,16 +568,9 @@ SUCCESS
       await createProject(workspaceDir, Pubspec('a'));
       await runPubGet(workspaceDir.path);
 
-      final logger = TestLogger();
-      final config = await MelosWorkspaceConfig.fromWorkspaceRoot(workspaceDir);
-      final melos = Melos(
-        logger: logger,
-        config: config,
-      );
-
-      expect(
-        () => melos.run(scriptName: 'hello_script'),
-        throwsException,
+      await expectLater(
+        MelosWorkspaceConfig.fromWorkspaceRoot(workspaceDir),
+        throwsA(isA<MelosConfigException>()),
       );
     });
 
@@ -585,15 +617,15 @@ SUCCESS
 melos run hello_script
 ➡️  Step: melos run test_script --include-private
 melos run test_script
-➡️  Step: echo test_script_1
+➡️  Step: echo ${currentPlatform.isWindows ? '"test_script_1"' : 'test_script_1'}
 ${currentPlatform.isWindows ? '"test_script_1"' : 'test_script_1'}
 
-➡️  Step: echo test_script_2
+➡️  Step: echo ${currentPlatform.isWindows ? '"test_script_2"' : 'test_script_2'}
 ${currentPlatform.isWindows ? '"test_script_2"' : 'test_script_2'}
 
 SUCCESS
 
-➡️  Step: echo hello world
+➡️  Step: echo ${currentPlatform.isWindows ? '"hello world"' : 'hello world'}
 ${currentPlatform.isWindows ? '"hello world"' : 'hello world'}
 
 SUCCESS
@@ -720,7 +752,7 @@ melos run list
 
 ${currentPlatform.isWindows ? '"list script"' : 'list script'}
 
-➡️  Step: echo hello world
+➡️  Step: echo ${currentPlatform.isWindows ? '"hello world"' : 'hello world'}
 ${currentPlatform.isWindows ? '"hello world"' : 'hello world'}
 
 SUCCESS

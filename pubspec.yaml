@@ -31,8 +31,8 @@ melos:
       dependencies:
         ansi_styles: ^0.3.2+1
         args: ^2.7.0
-        cli_launcher: ^0.3.3
-        cli_util: ^0.4.2
+        cli_launcher: ^0.3.3+1
+        cli_util: ^0.5.0
         collection: ^1.19.0
         file: ^7.0.1
         glob: ^2.1.3
@@ -73,8 +73,8 @@ melos:
   scripts:
     test:
       description: Run tests in a specific package.
-      run: dart test --concurrency=1
       exec:
+        command: dart test --concurrency=1
         concurrency: 1
       packageFilters:
         dirExists:

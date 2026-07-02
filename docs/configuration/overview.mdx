@@ -270,6 +270,20 @@ melos:
       generateAppRunConfigs: false
 ```
 
+### scriptNamePrefix
+
+The text prepended to generated IntelliJ run configuration names for Melos
+scripts.
+
+The default is `Melos Run -> `. Set this to an empty string to omit the prefix.
+
+```yaml
+melos:
+  ide:
+    intellij:
+      scriptNamePrefix: ""
+```
+
 ### runArguments
 
 Allows specifying additional run arguments per Flutter app package. This
@@ -311,17 +325,35 @@ Configuration for the `bootstrap` command.
 
 ### dependencyOverridePaths
 
-A list of paths to local packages relative to the workspace directory that
-should be added to each workspace package's dependency overrides. Each entry can
-be a specific path or a [glob] pattern.
+A list of paths to local packages that should be linked into the workspace as
+`dependency_overrides`. Paths are resolved relative to the workspace directory
+and each entry can be a specific path or a [glob] pattern.
+
+During `melos bootstrap`, every matched package is written as a path-based
+`dependency_overrides` entry into the workspace root `pubspec_overrides.yaml`.
+The managed entries are tagged with a `melos_managed_dependency_overrides`
+marker comment so any user-defined entries in the same file are preserved
+across bootstraps:
+
+```yaml
+# melos_managed_dependency_overrides: my_pkg
+dependency_overrides:
+  my_pkg:
+    path: ../external_project/packages/my_pkg
+```
+
+Entries no longer matched by `dependencyOverridePaths` are removed on the next
+bootstrap. Entries without the marker comment are left untouched.
 
 **Tip:** External local packages can be referenced using paths relative to the
 workspace root.
 
 ```yaml
 melos:
-  dependencyOverridePaths:
-    - '../external_project/packages/**'
+  command:
+    bootstrap:
+      dependencyOverridePaths:
+        - '../external_project/packages/**'
 ```
 
 ### runPubGetInParallel
@@ -350,6 +382,23 @@ The default is `false`.
 
 To temporarily override this `melos bootstrap --no-enforce-lockfile / --enforce-lockfile` can be
 used.
+
+### pubGetArgs
+
+A list of additional arguments to pass to `pub get` during bootstrapping.
+
+This is useful when you want to pass custom flags to `pub get` for all runs of
+`melos bootstrap` without having to specify them every time.
+
+The default is an empty list.
+
+```yaml
+melos:
+  command:
+    bootstrap:
+      pubGetArgs:
+        - --no-precompile
+```
 
 ## command/version
 
@@ -549,6 +598,7 @@ melos:
     version:
       changelogFormat:
         includeDate: true
+        groupByType: true
 ```
 
 #### includeDate
@@ -556,3 +606,29 @@ melos:
 Whether to include the date in the generated CHANGELOG.md. Defaults to `false`.
 
 With enabled, changelog entry header will include the date in the `yyyy-MM-dd` format.
+
+#### groupByType
+
+Whether to group changelog entries by their conventional commit type. Defaults
+to `false`.
+
+When enabled, entries are grouped under a single header per type (e.g. all
+features under a `Features` header and all fixes under a `Bug Fixes` header)
+instead of being listed in a single flat list:
+
+```md
+## 1.2.0
+
+### Features
+
+ - added user authentication.
+ - implemented dark mode support.
+
+### Bug Fixes
+
+ - corrected issue with API call.
+ - resolved UI glitch on iOS.
+```
+
+This setting can be overridden per run with the `--[no-]group-commits` flag on
+`melos version`.
